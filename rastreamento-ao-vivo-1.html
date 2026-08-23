@@ -1,0 +1,542 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+<title>Rastreamento ao Vivo</title>
+<meta name="theme-color" content="#0B120D">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Rastreamento">
+<meta name="mobile-web-app-capable" content="yes">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Chakra+Petch:wght@500;600;700&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-auth-compat.js"></script>
+<style>
+:root{
+  --bg:#0B120D;
+  --surface:#121C15;
+  --surface-2:#182419;
+  --line:#243428;
+  --amber:#E8A33D;
+  --amber-dim:#8A6425;
+  --green:#7CB35C;
+  --green-track:#2ECC71;
+  --blue-loc:#3B9EEB;
+  --red:#D96B4F;
+  --text:#F2EDE1;
+  --text-muted:#8FA08F;
+  --mono:'Chakra Petch',monospace;
+  --sans:'Inter',sans-serif;
+}
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent;}
+html,body{margin:0;padding:0;background:var(--bg);color:var(--text);font-family:var(--sans);height:100%;overscroll-behavior:none;}
+body{padding-bottom:20px;}
+::selection{background:var(--amber);color:#0B120D;}
+
+.topbar{display:flex;align-items:center;justify-content:space-between;padding:14px 18px 10px;}
+.brand{display:flex;align-items:center;gap:10px;}
+.brand-mark{width:34px;height:34px;border-radius:8px;background:linear-gradient(160deg,var(--amber),var(--amber-dim));display:flex;align-items:center;justify-content:center;font-size:18px;}
+.brand-name{font-family:var(--mono);font-weight:700;font-size:15px;letter-spacing:.03em;}
+.brand-sub{font-size:10px;color:var(--text-muted);letter-spacing:.08em;text-transform:uppercase;margin-top:1px;}
+.status-pill{font-family:var(--mono);font-size:11px;letter-spacing:.05em;text-transform:uppercase;padding:5px 10px;border-radius:20px;border:1px solid var(--line);color:var(--text-muted);display:flex;align-items:center;gap:6px;}
+.status-dot{width:7px;height:7px;border-radius:50%;background:var(--text-muted);}
+.status-pill.active{border-color:var(--green);color:var(--green);}
+.status-pill.active .status-dot{background:var(--green);box-shadow:0 0 8px var(--green);animation:pulse 1.4s infinite;}
+.status-pill.stale{border-color:var(--red);color:var(--red);}
+.status-pill.stale .status-dot{background:var(--red);}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:.35}}
+
+#installBtn{display:none;margin:0 18px 10px;padding:10px;background:var(--surface-2);color:var(--amber);border:1px solid var(--amber-dim);border-radius:10px;font-family:var(--mono);font-size:12px;letter-spacing:.03em;width:calc(100% - 36px);}
+
+.view{padding:0 18px;}
+
+#mapWrap{position:relative;margin-bottom:14px;}
+#map{height:320px;border-radius:16px;border:1px solid var(--line);background:#0e150f;}
+.follow-btn{position:absolute;bottom:10px;right:10px;z-index:500;width:38px;height:38px;border-radius:50%;background:var(--surface);border:1px solid var(--line);color:var(--blue-loc);font-size:17px;display:flex;align-items:center;justify-content:center;box-shadow:0 2px 8px rgba(0,0,0,.45);}
+.follow-btn.on{border-color:var(--blue-loc);}
+.follow-btn:active{transform:scale(.94);}
+.map-overlay-note{position:absolute;top:10px;left:10px;z-index:500;background:rgba(11,18,13,.85);border:1px solid var(--line);border-radius:10px;padding:6px 10px;font-family:var(--mono);font-size:11px;color:var(--text-muted);}
+
+.cluster{background:var(--surface);border:1px solid var(--line);border-radius:18px;padding:22px 18px;margin-bottom:14px;position:relative;overflow:hidden;}
+.cluster::before{content:'';position:absolute;top:-40%;right:-20%;width:60%;height:180%;background:radial-gradient(closest-side,rgba(232,163,61,.08),transparent);}
+.cluster-grid{display:grid;grid-template-columns:1fr 1fr;gap:0;position:relative;}
+.readout{padding:6px 10px;}
+.readout-label{font-size:10px;color:var(--text-muted);text-transform:uppercase;letter-spacing:.09em;margin-bottom:4px;}
+.readout-value{font-family:var(--mono);font-weight:600;font-size:38px;line-height:1;color:var(--text);}
+.readout-value.hero{font-size:52px;color:var(--amber);}
+.readout-unit{font-size:13px;color:var(--text-muted);margin-left:4px;font-weight:400;}
+.readout.divider-r{border-right:1px solid var(--line);}
+
+.stat-row{display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin-bottom:14px;}
+.stat-card{background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:12px 10px;text-align:center;}
+.stat-card .lbl{font-size:9.5px;color:var(--text-muted);text-transform:uppercase;letter-spacing:.07em;}
+.stat-card .val{font-family:var(--mono);font-size:15px;font-weight:600;margin-top:4px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+
+.progress-wrap{margin-top:16px;position:relative;}
+.progress-labels{display:flex;justify-content:space-between;font-size:10.5px;color:var(--text-muted);margin-bottom:6px;}
+.progress-labels b{color:#7CB35C;font-weight:600;font-family:var(--mono);}
+.progress-track{height:8px;border-radius:6px;background:var(--surface-2);border:1px solid var(--line);overflow:hidden;}
+.progress-fill{height:100%;width:0%;background:linear-gradient(90deg,#4C7A34,#7CB35C);transition:width .25s ease;}
+
+.update-note{font-family:var(--mono);font-size:11px;color:var(--text-muted);text-align:center;margin:4px 0 18px;}
+.update-note.stale{color:var(--red);}
+.sync-note{font-size:10px;color:var(--text-muted);text-align:center;margin:6px 0 16px;}
+.sync-note.err{color:var(--red);}
+
+.empty-state{text-align:center;color:var(--text-muted);font-size:13px;padding:60px 20px;}
+.empty-state .big{font-size:32px;margin-bottom:10px;}
+
+/* login (seleção de perfil, estilo Netflix) */
+#loginView{display:flex;flex-direction:column;align-items:center;justify-content:center;min-height:100vh;padding:40px 24px;text-align:center;}
+#loginView .login-title{font-family:var(--mono);font-weight:700;font-size:20px;letter-spacing:.03em;margin-bottom:4px;}
+#loginView .login-sub{font-size:12px;color:var(--text-muted);margin-bottom:32px;}
+.profile-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:18px;width:100%;max-width:360px;}
+.profile-card{display:flex;flex-direction:column;align-items:center;gap:8px;background:none;border:none;color:var(--text);}
+.profile-avatar{width:64px;height:64px;border-radius:14px;background:var(--surface);border:2px solid var(--line);display:flex;align-items:center;justify-content:center;font-family:var(--mono);font-weight:700;font-size:22px;color:var(--amber);}
+.profile-card:active .profile-avatar{transform:scale(.93);border-color:var(--amber);}
+.profile-name{font-size:11.5px;color:var(--text-muted);max-width:78px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.login-empty{color:var(--text-muted);font-size:13px;max-width:280px;}
+.login-note{margin-top:28px;font-size:10px;color:var(--text-muted);font-family:var(--mono);}
+.current-user-pill{font-family:var(--mono);font-size:10px;color:var(--text-muted);letter-spacing:.04em;display:flex;align-items:center;gap:6px;padding:0 18px 6px;}
+.current-user-pill button{background:none;border:none;color:var(--blue-loc);font-family:var(--mono);font-size:10px;padding:0;}
+</style>
+</head>
+<body>
+
+<!-- LOGIN (seleção de perfil, mesmo padrão dos outros apps do ecossistema Agro) -->
+<div id="loginView" style="display:none;">
+  <div class="login-title">📡 RASTREAMENTO</div>
+  <div class="login-sub">Quem está acompanhando?</div>
+  <div class="profile-grid" id="profileGrid"></div>
+  <div class="login-note" id="loginNote">Carregando usuários…</div>
+</div>
+
+<div id="appView" style="display:none;">
+<div class="current-user-pill">
+  <span id="currentUserLabel"></span>
+  <button id="switchUserBtn">trocar usuário</button>
+</div>
+<div class="topbar">
+  <div class="brand">
+    <div class="brand-mark">📡</div>
+    <div>
+      <div class="brand-name">RASTREAMENTO</div>
+      <div class="brand-sub">Painel ao vivo</div>
+    </div>
+  </div>
+  <div class="status-pill" id="statusPill"><span class="status-dot"></span><span id="statusText">Conectando…</span></div>
+</div>
+<button id="installBtn">📲 Instalar aplicativo</button>
+
+<div class="view" id="mainView" style="display:none;">
+  <div id="mapWrap">
+    <div id="map"></div>
+    <div class="map-overlay-note" id="jobNote" style="display:none;"></div>
+    <button class="follow-btn on" id="followBtn" title="Seguir trator">🎯</button>
+  </div>
+
+  <div class="cluster">
+    <div class="cluster-grid">
+      <div class="readout divider-r">
+        <div class="readout-label">Velocidade</div>
+        <div class="readout-value hero" id="speedVal">0,0<span class="readout-unit">km/h</span></div>
+      </div>
+      <div class="readout">
+        <div class="readout-label">Área trabalhada</div>
+        <div class="readout-value" id="areaVal">0,00<span class="readout-unit">ha</span></div>
+      </div>
+    </div>
+    <div id="jobProgressWrap" class="progress-wrap" style="display:none;">
+      <div class="progress-labels">
+        <span>Progresso do trabalho <b id="jobProgressName"></b></span>
+        <span id="jobProgressText">0%</span>
+      </div>
+      <div class="progress-track"><div class="progress-fill" id="jobProgressFill"></div></div>
+    </div>
+  </div>
+
+  <div class="stat-row">
+    <div class="stat-card"><div class="lbl">Operador</div><div class="val" id="operadorVal">—</div></div>
+    <div class="stat-card"><div class="lbl">Talhão</div><div class="val" id="talhaoVal">—</div></div>
+    <div class="stat-card"><div class="lbl">Fazenda</div><div class="val" id="fazendaVal">—</div></div>
+  </div>
+
+  <div class="stat-row" style="grid-template-columns:1fr 1fr;">
+    <div class="stat-card"><div class="lbl">Distância</div><div class="val" id="distVal">0,00 km</div></div>
+    <div class="stat-card"><div class="lbl">Status</div><div class="val" id="opStatusVal">—</div></div>
+  </div>
+
+  <div class="update-note" id="updateNote">—</div>
+</div>
+
+<div class="view" id="emptyView">
+  <div class="empty-state">
+    <div class="big">📡</div>
+    Aguardando o trator iniciar uma operação…<br>
+    Assim que a telemetria começar a ser enviada, o mapa e os dados aparecem aqui automaticamente.
+  </div>
+</div>
+
+<div class="sync-note" id="syncNote">Conectando ao Firebase…</div>
+</div><!-- /#appView -->
+
+<script>
+/* ======================= FIREBASE ======================= */
+// Mesmo projeto Firebase usado pelo app "Telemetria Trator" — lê o documento
+// telemetria_live/atual que aquele app atualiza a cada ~4s durante a operação.
+const firebaseConfig = {
+  apiKey: "AIzaSyD2lHB5tC4-8K_d8-SsNIvksF5vIErBlw0",
+  authDomain: "mapas-talhao.firebaseapp.com",
+  projectId: "mapas-talhao",
+  storageBucket: "mapas-talhao.firebasestorage.app",
+  messagingSenderId: "919142593673",
+  appId: "1:919142593673:web:3d46cfad50665f3eec8258",
+  measurementId: "G-SDW8L0W0X2"
+};
+let db = null, firebaseOK = false;
+const isPlaceholderConfig = !firebaseConfig.apiKey || firebaseConfig.apiKey.startsWith('SUA_');
+if(!isPlaceholderConfig){
+  try{
+    firebase.initializeApp(firebaseConfig);
+    db = firebase.firestore();
+    firebaseOK = true;
+  }catch(e){ firebaseOK = false; }
+}
+const LIVE_DOC = 'atual';
+
+/* ======================= STATE ======================= */
+let map = null, tileLayer = null, marker = null, jobLayer = null, trailLayer = null;
+let follow = true;
+let trailPoints = [];
+let lastData = null;
+const STALE_MS = 30000; // sem atualização por 30s = considerado sem sinal
+
+function fmt(n,d=2){ return (Number(n)||0).toLocaleString('pt-BR',{minimumFractionDigits:d,maximumFractionDigits:d}); }
+
+/* ======================= MAP ======================= */
+function initMap(){
+  map = L.map('map',{zoomControl:false,attributionControl:false}).setView([-4.3,-44.4],14);
+  tileLayer = L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png',{
+    crossOrigin:'anonymous', maxZoom:19
+  }).addTo(map);
+  L.control.attribution({prefix:false}).addAttribution('© OpenStreetMap contributors © CARTO').addTo(map);
+  jobLayer = L.layerGroup().addTo(map);
+  trailLayer = L.polyline([],{color:'#3B9EEB',weight:3,opacity:.7}).addTo(map);
+  map.on('dragstart', ()=>{ follow = false; document.getElementById('followBtn').classList.remove('on'); });
+}
+
+const tractorIcon = L.divIcon({
+  html:'<div style="width:34px;height:34px;border-radius:50%;background:#182419;border:2px solid #E8A33D;display:flex;align-items:center;justify-content:center;font-size:17px;box-shadow:0 2px 8px rgba(0,0,0,.5);">🚜</div>',
+  className:'', iconSize:[34,34], iconAnchor:[17,17]
+});
+
+function updateMap(lat, lng){
+  if(marker){
+    marker.setLatLng([lat,lng]);
+  } else {
+    marker = L.marker([lat,lng],{icon:tractorIcon}).addTo(map);
+  }
+  trailPoints.push([lat,lng]);
+  if(trailPoints.length > 500) trailPoints.shift();
+  trailLayer.setLatLngs(trailPoints);
+  if(follow) map.panTo([lat,lng]);
+}
+
+function drawJobArea(points){
+  jobLayer.clearLayers();
+  if(!points || points.length < 3) return;
+  L.polygon(points,{color:'#7CB35C',weight:2,fillColor:'#7CB35C',fillOpacity:.08,dashArray:'4 4'}).addTo(jobLayer);
+}
+
+/* ======================= RENDER ======================= */
+function renderData(data){
+  lastData = data;
+  document.getElementById('mainView').style.display = 'block';
+  document.getElementById('emptyView').style.display = 'none';
+
+  if(typeof data.lat === 'number' && typeof data.lng === 'number'){
+    updateMap(data.lat, data.lng);
+  }
+  document.getElementById('speedVal').innerHTML = fmt(data.speedKmh,1)+'<span class="readout-unit">km/h</span>';
+  document.getElementById('areaVal').innerHTML = fmt(data.areaHa,2)+'<span class="readout-unit">ha</span>';
+  document.getElementById('distVal').textContent = fmt(data.distKm,2)+' km';
+  document.getElementById('operadorVal').textContent = data.operador || '—';
+  document.getElementById('talhaoVal').textContent = data.talhao || '—';
+  document.getElementById('fazendaVal').textContent = data.fazenda || '—';
+
+  const opStatusEl = document.getElementById('opStatusVal');
+  opStatusEl.textContent = data.status === 'ativo' ? 'Em operação' : 'Parado';
+  opStatusEl.style.color = data.status === 'ativo' ? '#7CB35C' : 'var(--text)';
+
+  const jobWrap = document.getElementById('jobProgressWrap');
+  const jobNote = document.getElementById('jobNote');
+  if(data.jobNome && data.jobAreaHa){
+    jobWrap.style.display = 'block';
+    document.getElementById('jobProgressName').textContent = '('+data.jobNome+')';
+    const pct = Math.min(100, ((data.areaHa||0) / data.jobAreaHa) * 100);
+    document.getElementById('jobProgressFill').style.width = pct+'%';
+    document.getElementById('jobProgressText').textContent = fmt(pct,0)+'% ('+fmt(data.areaHa,2)+' / '+fmt(data.jobAreaHa,2)+' ha)';
+    jobNote.style.display = 'block';
+    jobNote.textContent = '📐 '+data.jobNome;
+  } else {
+    jobWrap.style.display = 'none';
+    jobNote.style.display = 'none';
+  }
+  drawJobArea(data.jobPoints);
+
+  refreshStatusUI();
+}
+
+function refreshStatusUI(){
+  const pill = document.getElementById('statusPill');
+  const statusText = document.getElementById('statusText');
+  const updateNote = document.getElementById('updateNote');
+  if(!lastData || !lastData.updatedISO){
+    pill.className = 'status-pill';
+    statusText.textContent = 'Sem dados';
+    updateNote.textContent = '—';
+    return;
+  }
+  const secs = Math.round((Date.now() - new Date(lastData.updatedISO).getTime())/1000);
+  const stale = secs*1000 > STALE_MS;
+  const label = secs < 60 ? `há ${secs}s` : `há ${Math.round(secs/60)} min`;
+  updateNote.textContent = 'Última atualização: '+label;
+  updateNote.classList.toggle('stale', stale);
+
+  if(stale){
+    pill.className = 'status-pill stale';
+    statusText.textContent = 'Sem sinal';
+  } else if(lastData.status === 'ativo'){
+    pill.className = 'status-pill active';
+    statusText.textContent = 'Em operação';
+  } else {
+    pill.className = 'status-pill';
+    statusText.textContent = 'Parado';
+  }
+}
+setInterval(refreshStatusUI, 1000);
+
+/* ======================= LOGIN (perfil, estilo Netflix) ======================= */
+// Lê a coleção 'usuarios' (mesma usada nos outros apps do ecossistema Agro) e
+// mostra uma grade de perfis. A escolha fica salva em sessionStorage, então
+// pede de novo só quando a aba/app é fechado. A autenticação anônima do Firebase
+// roda por trás (silenciosa) só pra satisfazer as regras de segurança (request.auth != null) —
+// ela não substitui a seleção de perfil, é só o "passaporte" técnico pro Firestore.
+const syncNote = document.getElementById('syncNote');
+const loginView = document.getElementById('loginView');
+const appView = document.getElementById('appView');
+const profileGrid = document.getElementById('profileGrid');
+const loginNote = document.getElementById('loginNote');
+const SESSION_KEY = 'rastreamento_usuario';
+
+function userLabel(u){
+  return u.nome || u.name || u.usuario || u.username || 'Sem nome';
+}
+function userInitial(u){
+  const emoji = u.emoji || u.icone || u.avatar;
+  if(emoji) return emoji;
+  const label = userLabel(u);
+  return label.charAt(0).toUpperCase();
+}
+
+function showApp(user){
+  document.getElementById('currentUserLabel').textContent = '👤 ' + userLabel(user);
+  loginView.style.display = 'none';
+  appView.style.display = 'block';
+  if(!map) initMap();
+  setTimeout(()=>{ if(map) map.invalidateSize(); }, 50);
+  startListening();
+}
+
+function showLogin(){
+  appView.style.display = 'none';
+  loginView.style.display = 'flex';
+  loadProfiles();
+}
+
+async function loadProfiles(){
+  profileGrid.innerHTML = '';
+  loginNote.textContent = 'Carregando usuários…';
+  try{
+    const snap = await db.collection('usuarios').get();
+    if(snap.empty){
+      loginNote.innerHTML = '<div class="login-empty">Nenhum usuário cadastrado na coleção "usuarios" ainda.</div>';
+      return;
+    }
+    loginNote.textContent = '';
+    snap.forEach(doc=>{
+      const u = doc.data();
+      const btn = document.createElement('button');
+      btn.className = 'profile-card';
+      btn.innerHTML = `<div class="profile-avatar">${userInitial(u)}</div><div class="profile-name">${userLabel(u)}</div>`;
+      btn.addEventListener('click', ()=>{
+        const record = {id: doc.id, ...u};
+        sessionStorage.setItem(SESSION_KEY, JSON.stringify(record));
+        showApp(record);
+      });
+      profileGrid.appendChild(btn);
+    });
+  }catch(err){
+    console.warn('Erro ao carregar usuários', err);
+    loginNote.innerHTML = '<div class="login-empty">Não foi possível carregar os usuários ('+err.code+').</div>';
+  }
+}
+
+document.getElementById('switchUserBtn').addEventListener('click', ()=>{
+  sessionStorage.removeItem(SESSION_KEY);
+  showLogin();
+});
+
+/* ======================= FIREBASE LISTENER ======================= */
+function startListening(){
+  db.collection('telemetria_live').doc(LIVE_DOC).onSnapshot(
+    (snap)=>{
+      syncNote.textContent = 'Conectado — atualizando em tempo real';
+      syncNote.classList.remove('err');
+      if(snap.exists){
+        renderData(snap.data());
+      } else {
+        document.getElementById('mainView').style.display = 'none';
+        document.getElementById('emptyView').style.display = 'block';
+      }
+    },
+    (err)=>{
+      console.warn('Erro no listener', err);
+      if(err.code === 'permission-denied'){
+        syncNote.textContent = 'Acesso negado pelas regras do Firestore (permission-denied).';
+      } else {
+        syncNote.textContent = 'Falha na conexão com o Firebase ('+err.code+').';
+      }
+      syncNote.classList.add('err');
+    }
+  );
+}
+
+if(!firebaseOK){
+  loginNote.textContent = 'Sem configuração do Firebase — verifique firebaseConfig no código.';
+  loginView.style.display = 'flex';
+} else {
+  firebase.auth().signInAnonymously()
+    .then(()=>{
+      const saved = sessionStorage.getItem(SESSION_KEY);
+      if(saved){
+        showApp(JSON.parse(saved));
+      } else {
+        showLogin();
+      }
+    })
+    .catch((err)=>{
+      console.warn('Erro no login anônimo', err);
+      loginNote.innerHTML = '<div class="login-empty">Falha ao autenticar (' + err.code + '). Habilite "Anônimo" em Authentication > Sign-in method no Firebase Console.</div>';
+      loginView.style.display = 'flex';
+    });
+}
+
+document.getElementById('followBtn').addEventListener('click', ()=>{
+  follow = !follow;
+  document.getElementById('followBtn').classList.toggle('on', follow);
+  if(follow && lastData && typeof lastData.lat === 'number') map.panTo([lastData.lat, lastData.lng]);
+});
+
+/* ======================= PWA (manifest + service worker via Blob, sem arquivos externos) ======================= */
+function makeIconDataURL(size){
+  const c = document.createElement('canvas');
+  c.width = size; c.height = size;
+  const ctx = c.getContext('2d');
+  const grad = ctx.createLinearGradient(0,0,size,size);
+  grad.addColorStop(0,'#E8A33D'); grad.addColorStop(1,'#8A6425');
+  ctx.fillStyle = '#0B120D'; ctx.fillRect(0,0,size,size);
+  const r = size*0.22;
+  ctx.beginPath();
+  ctx.moveTo(r,0); ctx.lineTo(size-r,0); ctx.quadraticCurveTo(size,0,size,r);
+  ctx.lineTo(size,size-r); ctx.quadraticCurveTo(size,size,size-r,size);
+  ctx.lineTo(r,size); ctx.quadraticCurveTo(0,size,0,size-r);
+  ctx.lineTo(0,r); ctx.quadraticCurveTo(0,0,r,0); ctx.closePath();
+  ctx.fillStyle = '#121C15'; ctx.fill();
+  ctx.fillStyle = grad;
+  ctx.beginPath(); ctx.arc(size/2, size/2, size*0.30, 0, Math.PI*2); ctx.fill();
+  ctx.fillStyle = '#0B120D';
+  ctx.font = `bold ${Math.round(size*0.32)}px sans-serif`;
+  ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  ctx.fillText('📡', size/2, size/2+size*0.02);
+  return c.toDataURL('image/png');
+}
+
+function setupPWA(){
+  try{
+    const icon192 = makeIconDataURL(192);
+    const icon512 = makeIconDataURL(512);
+    const manifest = {
+      name: 'Rastreamento ao Vivo',
+      short_name: 'Rastreamento',
+      description: 'Painel de acompanhamento em tempo real da telemetria do trator',
+      start_url: './',
+      scope: './',
+      display: 'standalone',
+      orientation: 'portrait',
+      background_color: '#0B120D',
+      theme_color: '#0B120D',
+      icons: [
+        {src:icon192, sizes:'192x192', type:'image/png', purpose:'any maskable'},
+        {src:icon512, sizes:'512x512', type:'image/png', purpose:'any maskable'}
+      ]
+    };
+    const manifestBlob = new Blob([JSON.stringify(manifest)], {type:'application/manifest+json'});
+    const manifestURL = URL.createObjectURL(manifestBlob);
+    const link = document.createElement('link');
+    link.rel = 'manifest'; link.href = manifestURL;
+    document.head.appendChild(link);
+
+    const iconLink = document.createElement('link');
+    iconLink.rel = 'icon'; iconLink.type = 'image/png'; iconLink.href = icon512;
+    document.head.appendChild(iconLink);
+    const appleLink = document.createElement('link');
+    appleLink.rel = 'apple-touch-icon'; appleLink.href = icon512;
+    document.head.appendChild(appleLink);
+
+    const swCode = `
+      self.addEventListener('install', e => self.skipWaiting());
+      self.addEventListener('activate', e => self.clients.claim());
+      self.addEventListener('fetch', e => {});
+    `;
+    const swBlob = new Blob([swCode], {type:'application/javascript'});
+    const swURL = URL.createObjectURL(swBlob);
+    if('serviceWorker' in navigator){
+      navigator.serviceWorker.register(swURL).catch(()=>{});
+    }
+  }catch(e){ console.warn('PWA setup falhou', e); }
+}
+setupPWA();
+
+let deferredPrompt = null;
+const installBtn = document.getElementById('installBtn');
+window.addEventListener('beforeinstallprompt', (e)=>{
+  e.preventDefault();
+  deferredPrompt = e;
+  installBtn.style.display = 'block';
+});
+installBtn.addEventListener('click', async ()=>{
+  if(!deferredPrompt) return;
+  deferredPrompt.prompt();
+  await deferredPrompt.userChoice;
+  deferredPrompt = null;
+  installBtn.style.display = 'none';
+});
+window.addEventListener('appinstalled', ()=>{ installBtn.style.display = 'none'; });
+
+const isIOS = /iphone|ipad|ipod/.test(navigator.userAgent.toLowerCase());
+const isStandalone = window.matchMedia('(display-mode: standalone)').matches || window.navigator.standalone;
+if(isIOS && !isStandalone){
+  installBtn.textContent = '📲 Instalar: toque em Compartilhar → Adicionar à Tela de Início';
+  installBtn.style.display = 'block';
+  installBtn.style.fontSize = '11px';
+  installBtn.onclick = null;
+}
+</script>
+</body>
+</html>
